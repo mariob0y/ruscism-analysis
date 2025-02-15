@@ -1,67 +1,19 @@
 import json
 import os
 import glob
-import re
-import pymorphy2
 import matplotlib.pyplot as plt
 from wordcloud import WordCloud
-from utils import get_message_text
+from utils import get_message_text, lemmatize
+from const import (
+    dataset_path,
+    wordclouds_chart_path,
+    word_count_chart_path,
+    word_count_output_path,
+)
 
-# Initialize the morphological analyzer for Russian
-morph = pymorphy2.MorphAnalyzer()
 
-# Load Russian stopwords from a JSON file
 with open("stopwords-ru.json", encoding="utf-8") as f:
-    russian_stopwords = set(json.load(f))  # Convert to set for faster lookup
-
-# Define paths for datasets and output directories
-dataset_path = "datasets"
-diagram_path = "diagrams"
-wordclouds_path = "wordclouds"
-
-# Ensure output directories exist
-os.makedirs(diagram_path, exist_ok=True)
-os.makedirs(wordclouds_path, exist_ok=True)
-
-# Mapping words to their root equivalents to normalize variations
-root_word_map = {
-    "рф": "россия",
-    "российский": "россия",
-    "украинский": "украина",
-    "европейский": "европа",
-    "евросоюз": "европа",
-    "ес": "европа",
-    "американский": "сша",
-    "америка": "сша",
-    "победить": "победа",
-    "натовский": "нато",
-    "польский": "польша",
-    "бандеровский": "бандера",
-    "бандеровец": "бандера",
-    "нацистский": "нацист",
-}
-
-
-def lemmatize(text):
-    """
-    Tokenizes and lemmatizes the input text, mapping words to their root forms.
-    """
-    words = re.split(r"[\n \-_,.]+", text)  # Split by common delimiters
-    res = []
-    for word in words:
-        if word.startswith("#"):
-            continue  # Ignore hashtags
-        word = re.sub(
-            r"[^а-яА-ЯёЁa-zA-Z]+", "", word
-        )  # Remove non-alphabetic characters
-        if not word:
-            continue
-        lemma = morph.parse(word)[0].normal_form  # Get the normal form (lemma)
-        lemma = root_word_map.get(
-            lemma, lemma
-        )  # Replace with mapped root word if applicable
-        res.append(lemma)
-    return res
+    russian_stopwords = set(json.load(f))
 
 
 def process_dataset(data):
@@ -91,15 +43,13 @@ def create_chart(wordcloud, final_text, dataset_name):
         ),
         key=lambda item: item[1],
         reverse=True,
-    )[
-        :50
-    ]  # Get top 50 words
+    )
 
     if not sorted_word_count:
         print(f"No significant words found for {dataset_name}, skipping chart.")
         return
 
-    words, frequencies = zip(*sorted_word_count)
+    words, frequencies = zip(*sorted_word_count[:50])
 
     plt.figure(figsize=(10, 15))
     plt.barh(words, frequencies, color="skyblue", height=0.4)
@@ -112,9 +62,11 @@ def create_chart(wordcloud, final_text, dataset_name):
         plt.text(v + 1, i, str(v), fontsize=10, verticalalignment="center")
 
     plt.savefig(
-        os.path.join(diagram_path, f"{dataset_name}_chart.png"), bbox_inches="tight"
+        os.path.join(word_count_chart_path, f"{dataset_name}_chart.png"),
+        bbox_inches="tight",
     )
     plt.close()
+    return sorted_word_count
 
 
 def create_wordcloud(wordcloud, final_text, dataset_name):
@@ -130,7 +82,7 @@ def create_wordcloud(wordcloud, final_text, dataset_name):
     plt.imshow(visual_result, interpolation="bilinear")
     plt.axis("off")
     plt.savefig(
-        os.path.join(wordclouds_path, f"{dataset_name}_wordcloud.png"),
+        os.path.join(wordclouds_chart_path, f"{dataset_name}_wordcloud.png"),
         bbox_inches="tight",
     )
     plt.close()
@@ -148,6 +100,10 @@ def main():
 
     for file_path in datasets:
         dataset_name = os.path.splitext(os.path.basename(file_path))[0]
+        output_path = f"{word_count_output_path}/{dataset_name}.json"
+
+        if os.path.exists(output_path):
+            continue
         print(f"Processing {dataset_name}...")
 
         with open(file_path, encoding="utf-8") as f:
@@ -163,9 +119,15 @@ def main():
             stopwords=russian_stopwords,
         )
 
-        create_chart(wordcloud, final_text, dataset_name)
+        word_count = create_chart(wordcloud, final_text, dataset_name)
         create_wordcloud(wordcloud, final_text, dataset_name)
         print(f"Finished processing {dataset_name}.")
+        with open(output_path, "w", encoding="utf-8") as json_file:
+            json.dump(
+                word_count,
+                json_file,
+                ensure_ascii=False,
+            )
 
 
 if __name__ == "__main__":
